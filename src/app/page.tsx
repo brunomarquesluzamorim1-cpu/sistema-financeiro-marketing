@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Badge } from '@/components/ui/badge'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Checkbox } from '@/components/ui/checkbox'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { 
@@ -27,7 +28,15 @@ import {
   LogOut,
   Settings,
   Target,
-  Zap
+  Zap,
+  Trash2,
+  Users,
+  UserPlus,
+  Shield,
+  Mail,
+  CheckCircle,
+  Clock,
+  AlertCircle
 } from 'lucide-react'
 
 // Tipos de dados
@@ -41,11 +50,18 @@ interface Transaction {
   paymentMethod: string
   platform?: string
   isAdvertising?: boolean
+  userId: string
+  userName: string
 }
 
 interface User {
+  id: string
   email: string
   password: string
+  name: string
+  role: 'admin' | 'user' | 'viewer'
+  createdAt: Date
+  invitedBy?: string
 }
 
 interface Category {
@@ -59,20 +75,46 @@ interface PaymentMethod {
   name: string
 }
 
+interface Invitation {
+  id: string
+  email: string
+  role: 'admin' | 'user' | 'viewer'
+  invitedBy: string
+  createdAt: Date
+  status: 'pending' | 'accepted' | 'expired'
+}
+
+interface Task {
+  id: string
+  title: string
+  description: string
+  assignedTo: string
+  assignedToName: string
+  dueDate: Date
+  status: 'pending' | 'in-progress' | 'completed'
+  createdBy: string
+  createdByName: string
+  createdAt: Date
+}
+
 export default function FinancialDashboard() {
   // Estado para controlar se o componente foi montado no cliente
   const [isMounted, setIsMounted] = useState(false)
 
   // Estados de autenticação
   const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [currentUser, setCurrentUser] = useState<User | null>(null)
   const [users, setUsers] = useState<User[]>([])
+  const [invitations, setInvitations] = useState<Invitation[]>([])
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
-  const [registerForm, setRegisterForm] = useState({ email: '', password: '', confirmPassword: '' })
+  const [registerForm, setRegisterForm] = useState({ email: '', password: '', confirmPassword: '', name: '' })
+  const [inviteForm, setInviteForm] = useState({ email: '', role: 'user' as 'admin' | 'user' | 'viewer' })
   const [showPassword, setShowPassword] = useState(false)
   const [isRegistering, setIsRegistering] = useState(false)
 
   // Estados principais
   const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [tasks, setTasks] = useState<Task[]>([])
   const [categories, setCategories] = useState<Category[]>([
     { id: '1', name: 'Vendas', type: 'entrada' },
     { id: '2', name: 'Serviços', type: 'entrada' },
@@ -102,19 +144,35 @@ export default function FinancialDashboard() {
     isAdvertising: false
   })
 
+  const [taskForm, setTaskForm] = useState({
+    title: '',
+    description: '',
+    assignedTo: '',
+    dueDate: new Date()
+  })
+
   // Estados de filtros
   const [filters, setFilters] = useState({
     startDate: null as Date | null,
     endDate: null as Date | null,
     type: 'all' as 'all' | 'entrada' | 'saida' | 'aporte',
     category: 'all',
-    platform: 'all'
+    platform: 'all',
+    user: 'all'
+  })
+
+  const [taskFilters, setTaskFilters] = useState({
+    status: 'all' as 'all' | 'pending' | 'in-progress' | 'completed',
+    assignedTo: 'all'
   })
 
   // Estados de modais
   const [showTransactionModal, setShowTransactionModal] = useState(false)
+  const [showTaskModal, setShowTaskModal] = useState(false)
   const [showCategoryModal, setShowCategoryModal] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [showUsersModal, setShowUsersModal] = useState(false)
+  const [showInviteModal, setShowInviteModal] = useState(false)
   const [newCategory, setNewCategory] = useState({ name: '', type: 'entrada' as 'entrada' | 'saida' | 'aporte' })
   const [newPaymentMethod, setNewPaymentMethod] = useState('')
 
@@ -132,9 +190,12 @@ export default function FinancialDashboard() {
 
     const savedUsers = localStorage.getItem('financial-users')
     const savedTransactions = localStorage.getItem('financial-transactions')
+    const savedTasks = localStorage.getItem('financial-tasks')
     const savedCategories = localStorage.getItem('financial-categories')
     const savedPaymentMethods = localStorage.getItem('financial-payment-methods')
+    const savedInvitations = localStorage.getItem('financial-invitations')
     const savedAuth = localStorage.getItem('financial-auth')
+    const savedCurrentUser = localStorage.getItem('financial-current-user')
     const savedIdCounter = localStorage.getItem('financial-id-counter')
 
     if (savedUsers) setUsers(JSON.parse(savedUsers))
@@ -142,9 +203,21 @@ export default function FinancialDashboard() {
       const parsed = JSON.parse(savedTransactions)
       setTransactions(parsed.map((t: any) => ({ ...t, date: new Date(t.date) })))
     }
+    if (savedTasks) {
+      const parsed = JSON.parse(savedTasks)
+      setTasks(parsed.map((t: any) => ({ 
+        ...t, 
+        dueDate: new Date(t.dueDate),
+        createdAt: new Date(t.createdAt)
+      })))
+    }
     if (savedCategories) setCategories(JSON.parse(savedCategories))
     if (savedPaymentMethods) setPaymentMethods(JSON.parse(savedPaymentMethods))
-    if (savedAuth) setIsLoggedIn(true)
+    if (savedInvitations) setInvitations(JSON.parse(savedInvitations))
+    if (savedAuth && savedCurrentUser) {
+      setIsLoggedIn(true)
+      setCurrentUser(JSON.parse(savedCurrentUser))
+    }
     if (savedIdCounter) setIdCounter(parseInt(savedIdCounter))
   }, [isMounted])
 
@@ -161,6 +234,11 @@ export default function FinancialDashboard() {
 
   useEffect(() => {
     if (!isMounted) return
+    localStorage.setItem('financial-tasks', JSON.stringify(tasks))
+  }, [tasks, isMounted])
+
+  useEffect(() => {
+    if (!isMounted) return
     localStorage.setItem('financial-categories', JSON.stringify(categories))
   }, [categories, isMounted])
 
@@ -171,8 +249,20 @@ export default function FinancialDashboard() {
 
   useEffect(() => {
     if (!isMounted) return
+    localStorage.setItem('financial-invitations', JSON.stringify(invitations))
+  }, [invitations, isMounted])
+
+  useEffect(() => {
+    if (!isMounted) return
     localStorage.setItem('financial-id-counter', idCounter.toString())
   }, [idCounter, isMounted])
+
+  useEffect(() => {
+    if (!isMounted) return
+    if (currentUser) {
+      localStorage.setItem('financial-current-user', JSON.stringify(currentUser))
+    }
+  }, [currentUser, isMounted])
 
   // Função para gerar ID único
   const generateId = () => {
@@ -186,8 +276,10 @@ export default function FinancialDashboard() {
     const user = users.find(u => u.email === loginForm.email && u.password === loginForm.password)
     if (user) {
       setIsLoggedIn(true)
+      setCurrentUser(user)
       if (isMounted) {
         localStorage.setItem('financial-auth', 'true')
+        localStorage.setItem('financial-current-user', JSON.stringify(user))
       }
       setLoginForm({ email: '', password: '' })
     } else {
@@ -204,22 +296,74 @@ export default function FinancialDashboard() {
       alert('Email já cadastrado!')
       return
     }
-    setUsers([...users, { email: registerForm.email, password: registerForm.password }])
-    setRegisterForm({ email: '', password: '', confirmPassword: '' })
+
+    const newUser: User = {
+      id: generateId(),
+      email: registerForm.email,
+      password: registerForm.password,
+      name: registerForm.name,
+      role: users.length === 0 ? 'admin' : 'user', // Primeiro usuário é admin
+      createdAt: new Date()
+    }
+
+    setUsers([...users, newUser])
+    setRegisterForm({ email: '', password: '', confirmPassword: '', name: '' })
     setIsRegistering(false)
     alert('Usuário cadastrado com sucesso!')
   }
 
   const handleLogout = () => {
     setIsLoggedIn(false)
+    setCurrentUser(null)
     if (isMounted) {
       localStorage.removeItem('financial-auth')
+      localStorage.removeItem('financial-current-user')
     }
+  }
+
+  // Funções de convites
+  const handleInviteUser = () => {
+    if (!inviteForm.email || !currentUser) return
+
+    if (users.find(u => u.email === inviteForm.email)) {
+      alert('Este email já está cadastrado!')
+      return
+    }
+
+    if (invitations.find(i => i.email === inviteForm.email && i.status === 'pending')) {
+      alert('Já existe um convite pendente para este email!')
+      return
+    }
+
+    const newInvitation: Invitation = {
+      id: generateId(),
+      email: inviteForm.email,
+      role: inviteForm.role,
+      invitedBy: currentUser.id,
+      createdAt: new Date(),
+      status: 'pending'
+    }
+
+    setInvitations([...invitations, newInvitation])
+    setInviteForm({ email: '', role: 'user' })
+    setShowInviteModal(false)
+    alert(`Convite enviado para ${newInvitation.email}! (Simulado - em produção seria enviado por email)`)
+  }
+
+  const updateUserRole = (userId: string, newRole: 'admin' | 'user' | 'viewer') => {
+    if (currentUser?.role !== 'admin') {
+      alert('Apenas administradores podem alterar permissões!')
+      return
+    }
+
+    setUsers(users.map(user => 
+      user.id === userId ? { ...user, role: newRole } : user
+    ))
   }
 
   // Funções de transações
   const addTransaction = () => {
-    if (!transactionForm.category || !transactionForm.description || !transactionForm.amount || !transactionForm.paymentMethod) {
+    if (!transactionForm.category || !transactionForm.description || !transactionForm.amount || !transactionForm.paymentMethod || !currentUser) {
       alert('Preencha todos os campos obrigatórios!')
       return
     }
@@ -233,7 +377,9 @@ export default function FinancialDashboard() {
       date: transactionForm.date,
       paymentMethod: transactionForm.paymentMethod,
       platform: transactionForm.platform || undefined,
-      isAdvertising: transactionForm.isAdvertising
+      isAdvertising: transactionForm.isAdvertising,
+      userId: currentUser.id,
+      userName: currentUser.name
     }
 
     setTransactions([...transactions, newTransaction])
@@ -248,6 +394,93 @@ export default function FinancialDashboard() {
       isAdvertising: false
     })
     setShowTransactionModal(false)
+  }
+
+  const deleteTransaction = (transactionId: string) => {
+    if (!currentUser) return
+
+    const transaction = transactions.find(t => t.id === transactionId)
+    if (!transaction) return
+
+    // Verificar permissões: admin pode deletar qualquer transação, usuários só suas próprias
+    if (currentUser.role !== 'admin' && transaction.userId !== currentUser.id) {
+      alert('Você só pode deletar suas próprias transações!')
+      return
+    }
+
+    if (confirm('Tem certeza que deseja deletar esta transação?')) {
+      setTransactions(transactions.filter(t => t.id !== transactionId))
+    }
+  }
+
+  // Funções de tarefas
+  const addTask = () => {
+    if (!taskForm.title || !taskForm.assignedTo || !currentUser) {
+      alert('Preencha todos os campos obrigatórios!')
+      return
+    }
+
+    const assignedUser = users.find(u => u.id === taskForm.assignedTo)
+    if (!assignedUser) {
+      alert('Usuário não encontrado!')
+      return
+    }
+
+    const newTask: Task = {
+      id: generateId(),
+      title: taskForm.title,
+      description: taskForm.description,
+      assignedTo: taskForm.assignedTo,
+      assignedToName: assignedUser.name,
+      dueDate: taskForm.dueDate,
+      status: 'pending',
+      createdBy: currentUser.id,
+      createdByName: currentUser.name,
+      createdAt: new Date()
+    }
+
+    setTasks([...tasks, newTask])
+    setTaskForm({
+      title: '',
+      description: '',
+      assignedTo: '',
+      dueDate: new Date()
+    })
+    setShowTaskModal(false)
+  }
+
+  const updateTaskStatus = (taskId: string, newStatus: 'pending' | 'in-progress' | 'completed') => {
+    if (!currentUser) return
+
+    const task = tasks.find(t => t.id === taskId)
+    if (!task) return
+
+    // Verificar permissões: admin pode alterar qualquer tarefa, usuários só suas próprias ou que foram atribuídas a eles
+    if (currentUser.role !== 'admin' && task.assignedTo !== currentUser.id && task.createdBy !== currentUser.id) {
+      alert('Você só pode alterar tarefas atribuídas a você ou criadas por você!')
+      return
+    }
+
+    setTasks(tasks.map(t => 
+      t.id === taskId ? { ...t, status: newStatus } : t
+    ))
+  }
+
+  const deleteTask = (taskId: string) => {
+    if (!currentUser) return
+
+    const task = tasks.find(t => t.id === taskId)
+    if (!task) return
+
+    // Verificar permissões: admin pode deletar qualquer tarefa, usuários só suas próprias
+    if (currentUser.role !== 'admin' && task.createdBy !== currentUser.id) {
+      alert('Você só pode deletar tarefas criadas por você!')
+      return
+    }
+
+    if (confirm('Tem certeza que deseja deletar esta tarefa?')) {
+      setTasks(tasks.filter(t => t.id !== taskId))
+    }
   }
 
   const addCategory = () => {
@@ -278,8 +511,16 @@ export default function FinancialDashboard() {
     if (filters.type !== 'all' && transaction.type !== filters.type) return false
     if (filters.category !== 'all' && transaction.category !== filters.category) return false
     if (filters.platform !== 'all' && transaction.platform !== filters.platform) return false
+    if (filters.user !== 'all' && transaction.userId !== filters.user) return false
     if (filters.startDate && transaction.date < filters.startDate) return false
     if (filters.endDate && transaction.date > filters.endDate) return false
+    return true
+  })
+
+  // Filtrar tarefas
+  const filteredTasks = tasks.filter(task => {
+    if (taskFilters.status !== 'all' && task.status !== taskFilters.status) return false
+    if (taskFilters.assignedTo !== 'all' && task.assignedTo !== taskFilters.assignedTo) return false
     return true
   })
 
@@ -317,6 +558,18 @@ export default function FinancialDashboard() {
     .filter(t => t.platform === 'Facebook' || t.category.includes('Facebook'))
     .reduce((sum, t) => sum + t.amount, 0)
 
+  // Métricas de tarefas
+  const totalTasks = tasks.length
+  const completedTasks = tasks.filter(t => t.status === 'completed').length
+  const pendingTasks = tasks.filter(t => t.status === 'pending').length
+  const overdueTasks = tasks.filter(t => t.status !== 'completed' && new Date(t.dueDate) < new Date()).length
+
+  // Verificar permissões
+  const canManageUsers = currentUser?.role === 'admin'
+  const canAddTransactions = currentUser?.role === 'admin' || currentUser?.role === 'user'
+  const canViewAllTransactions = currentUser?.role === 'admin'
+  const canManageTasks = currentUser?.role === 'admin' || currentUser?.role === 'user'
+
   // Mostrar loading enquanto não montou no cliente
   if (!isMounted) {
     return (
@@ -342,6 +595,16 @@ export default function FinancialDashboard() {
           <CardContent className="space-y-4">
             {isRegistering ? (
               <>
+                <div className="space-y-2">
+                  <Label htmlFor="register-name">Nome Completo</Label>
+                  <Input
+                    id="register-name"
+                    type="text"
+                    value={registerForm.name}
+                    onChange={(e) => setRegisterForm({...registerForm, name: e.target.value})}
+                    placeholder="Seu nome completo"
+                  />
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="register-email">Email</Label>
                   <Input
@@ -456,6 +719,26 @@ export default function FinancialDashboard() {
               <h1 className="text-xl font-bold text-gray-900">Dashboard Financeiro</h1>
             </div>
             <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2 text-sm text-gray-600">
+                <span>Olá, {currentUser?.name}</span>
+                <Badge variant={
+                  currentUser?.role === 'admin' ? 'default' : 
+                  currentUser?.role === 'user' ? 'secondary' : 'outline'
+                }>
+                  {currentUser?.role === 'admin' ? 'Admin' : 
+                   currentUser?.role === 'user' ? 'Usuário' : 'Visualizador'}
+                </Badge>
+              </div>
+              {canManageUsers && (
+                <Dialog open={showUsersModal} onOpenChange={setShowUsersModal}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <Users className="h-4 w-4 mr-2" />
+                      Usuários
+                    </Button>
+                  </DialogTrigger>
+                </Dialog>
+              )}
               <Dialog>
                 <DialogTrigger asChild>
                   <Button variant="outline" size="sm">
@@ -595,9 +878,10 @@ export default function FinancialDashboard() {
 
         {/* Tabs principais */}
         <Tabs defaultValue="dashboard" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="transactions">Transações</TabsTrigger>
+            <TabsTrigger value="tasks">Tarefas</TabsTrigger>
             <TabsTrigger value="reports">Relatórios</TabsTrigger>
           </TabsList>
 
@@ -611,7 +895,7 @@ export default function FinancialDashboard() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
                   <div>
                     <Label>Data Início</Label>
                     <Popover>
@@ -695,6 +979,23 @@ export default function FinancialDashboard() {
                       </SelectContent>
                     </Select>
                   </div>
+
+                  {canViewAllTransactions && (
+                    <div>
+                      <Label>Usuário</Label>
+                      <Select value={filters.user} onValueChange={(value) => setFilters({...filters, user: value})}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todos</SelectItem>
+                          {users.map(user => (
+                            <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                 </div>
                 <div className="mt-4">
                   <Button 
@@ -704,7 +1005,8 @@ export default function FinancialDashboard() {
                       endDate: null,
                       type: 'all',
                       category: 'all',
-                      platform: 'all'
+                      platform: 'all',
+                      user: 'all'
                     })}
                   >
                     Limpar Filtros
@@ -713,126 +1015,29 @@ export default function FinancialDashboard() {
               </CardContent>
             </Card>
 
-            {/* Botão Adicionar Transação */}
-            <div className="flex justify-end">
-              <Dialog open={showTransactionModal} onOpenChange={setShowTransactionModal}>
-                <DialogTrigger asChild>
-                  <Button className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700">
-                    <PlusCircle className="h-4 w-4 mr-2" />
-                    Nova Transação
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-md">
-                  <DialogHeader>
-                    <DialogTitle>Adicionar Transação</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <div>
-                      <Label>Tipo</Label>
-                      <Select value={transactionForm.type} onValueChange={(value: any) => setTransactionForm({...transactionForm, type: value})}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="entrada">Entrada</SelectItem>
-                          <SelectItem value="saida">Saída</SelectItem>
-                          <SelectItem value="aporte">Aporte</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <Label>Categoria</Label>
-                      <Select value={transactionForm.category} onValueChange={(value) => setTransactionForm({...transactionForm, category: value})}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione uma categoria" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {categories.filter(cat => cat.type === transactionForm.type).map(cat => (
-                            <SelectItem key={cat.id} value={cat.name}>{cat.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <Label>Descrição</Label>
-                      <Textarea
-                        value={transactionForm.description}
-                        onChange={(e) => setTransactionForm({...transactionForm, description: e.target.value})}
-                        placeholder="Descreva a transação..."
-                      />
-                    </div>
-
-                    <div>
-                      <Label>Valor (R$)</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={transactionForm.amount}
-                        onChange={(e) => setTransactionForm({...transactionForm, amount: e.target.value})}
-                        placeholder="0,00"
-                      />
-                    </div>
-
-                    <div>
-                      <Label>Data</Label>
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button variant="outline" className="w-full justify-start text-left font-normal">
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {format(transactionForm.date, 'dd/MM/yyyy', { locale: ptBR })}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0">
-                          <Calendar
-                            mode="single"
-                            selected={transactionForm.date}
-                            onSelect={(date) => setTransactionForm({...transactionForm, date: date || new Date()})}
-                            initialFocus
-                          />
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-
-                    <div>
-                      <Label>Forma de Pagamento</Label>
-                      <Select value={transactionForm.paymentMethod} onValueChange={(value) => setTransactionForm({...transactionForm, paymentMethod: value})}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {paymentMethods.map(method => (
-                            <SelectItem key={method.id} value={method.name}>{method.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {transactionForm.type === 'saida' && (
-                      <>
-                        <div>
-                          <Label>Plataforma (Anúncios)</Label>
-                          <Select value={transactionForm.platform} onValueChange={(value) => setTransactionForm({...transactionForm, platform: value, isAdvertising: value !== ''})}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Selecione (opcional)" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="">Não é anúncio</SelectItem>
-                              <SelectItem value="Google">Google Ads</SelectItem>
-                              <SelectItem value="Facebook">Facebook Ads</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </>
-                    )}
-
-                    <Button onClick={addTransaction} className="w-full">
-                      Adicionar Transação
+            {/* Botões de Ação */}
+            <div className="flex justify-end space-x-4">
+              {canManageUsers && (
+                <Dialog open={showInviteModal} onOpenChange={setShowInviteModal}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline">
+                      <UserPlus className="h-4 w-4 mr-2" />
+                      Convidar Usuário
                     </Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
+                  </DialogTrigger>
+                </Dialog>
+              )}
+              
+              {canAddTransactions && (
+                <Dialog open={showTransactionModal} onOpenChange={setShowTransactionModal}>
+                  <DialogTrigger asChild>
+                    <Button className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700">
+                      <PlusCircle className="h-4 w-4 mr-2" />
+                      Nova Transação
+                    </Button>
+                  </DialogTrigger>
+                </Dialog>
+              )}
             </div>
           </TabsContent>
 
@@ -865,16 +1070,205 @@ export default function FinancialDashboard() {
                           <div className="flex items-center space-x-4 text-xs text-gray-500 mt-2">
                             <span>{format(transaction.date, 'dd/MM/yyyy', { locale: ptBR })}</span>
                             <span>{transaction.paymentMethod}</span>
+                            <span>Por: {transaction.userName}</span>
                           </div>
                         </div>
-                        <div className={`text-lg font-bold ${
-                          transaction.type === 'entrada' ? 'text-green-600' : 
-                          transaction.type === 'saida' ? 'text-red-600' : 'text-blue-600'
-                        }`}>
-                          {transaction.type === 'saida' ? '-' : '+'}R$ {transaction.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        <div className="flex items-center space-x-4">
+                          <div className={`text-lg font-bold ${
+                            transaction.type === 'entrada' ? 'text-green-600' : 
+                            transaction.type === 'saida' ? 'text-red-600' : 'text-blue-600'
+                          }`}>
+                            {transaction.type === 'saida' ? '-' : '+'}R$ {transaction.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </div>
+                          {(currentUser?.role === 'admin' || transaction.userId === currentUser?.id) && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => deleteTransaction(transaction.id)}
+                              className="text-red-600 hover:text-red-700"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
                         </div>
                       </div>
                     ))
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="tasks" className="space-y-6">
+            {/* Métricas de Tarefas */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Total de Tarefas</CardTitle>
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{totalTasks}</div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Concluídas</CardTitle>
+                  <CheckCircle className="h-4 w-4 text-green-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-green-600">{completedTasks}</div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Pendentes</CardTitle>
+                  <Clock className="h-4 w-4 text-yellow-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-yellow-600">{pendingTasks}</div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Atrasadas</CardTitle>
+                  <AlertCircle className="h-4 w-4 text-red-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-red-600">{overdueTasks}</div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Filtros de Tarefas */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <span className="flex items-center">
+                    <Filter className="h-5 w-5 mr-2" />
+                    Filtros de Tarefas
+                  </span>
+                  {canManageTasks && (
+                    <Dialog open={showTaskModal} onOpenChange={setShowTaskModal}>
+                      <DialogTrigger asChild>
+                        <Button>
+                          <PlusCircle className="h-4 w-4 mr-2" />
+                          Nova Tarefa
+                        </Button>
+                      </DialogTrigger>
+                    </Dialog>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label>Status</Label>
+                    <Select value={taskFilters.status} onValueChange={(value: any) => setTaskFilters({...taskFilters, status: value})}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todos</SelectItem>
+                        <SelectItem value="pending">Pendente</SelectItem>
+                        <SelectItem value="in-progress">Em Andamento</SelectItem>
+                        <SelectItem value="completed">Concluída</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label>Responsável</Label>
+                    <Select value={taskFilters.assignedTo} onValueChange={(value) => setTaskFilters({...taskFilters, assignedTo: value})}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todos</SelectItem>
+                        {users.map(user => (
+                          <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Lista de Tarefas */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Lista de Tarefas</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {filteredTasks.length === 0 ? (
+                    <p className="text-center text-gray-500 py-8">Nenhuma tarefa encontrada</p>
+                  ) : (
+                    filteredTasks.map(task => {
+                      const isOverdue = task.status !== 'completed' && new Date(task.dueDate) < new Date()
+                      return (
+                        <div key={task.id} className={`p-4 border rounded-lg ${isOverdue ? 'border-red-200 bg-red-50' : ''}`}>
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center space-x-2 mb-2">
+                                <h3 className="font-medium">{task.title}</h3>
+                                <Badge variant={
+                                  task.status === 'completed' ? 'default' : 
+                                  task.status === 'in-progress' ? 'secondary' : 'outline'
+                                }>
+                                  {task.status === 'completed' ? 'Concluída' : 
+                                   task.status === 'in-progress' ? 'Em Andamento' : 'Pendente'}
+                                </Badge>
+                                {isOverdue && (
+                                  <Badge variant="destructive">Atrasada</Badge>
+                                )}
+                              </div>
+                              {task.description && (
+                                <p className="text-sm text-gray-600 mb-2">{task.description}</p>
+                              )}
+                              <div className="flex items-center space-x-4 text-xs text-gray-500">
+                                <span>Responsável: {task.assignedToName}</span>
+                                <span>Prazo: {format(task.dueDate, 'dd/MM/yyyy', { locale: ptBR })}</span>
+                                <span>Criado por: {task.createdByName}</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              {(currentUser?.role === 'admin' || task.assignedTo === currentUser?.id || task.createdBy === currentUser?.id) && (
+                                <>
+                                  <Select 
+                                    value={task.status} 
+                                    onValueChange={(value: any) => updateTaskStatus(task.id, value)}
+                                  >
+                                    <SelectTrigger className="w-32">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="pending">Pendente</SelectItem>
+                                      <SelectItem value="in-progress">Em Andamento</SelectItem>
+                                      <SelectItem value="completed">Concluída</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  {(currentUser?.role === 'admin' || task.createdBy === currentUser?.id) && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => deleteTask(task.id)}
+                                      className="text-red-600 hover:text-red-700"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })
                   )}
                 </div>
               </CardContent>
@@ -953,9 +1347,380 @@ export default function FinancialDashboard() {
                   </div>
                 </CardContent>
               </Card>
+
+              {canViewAllTransactions && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Atividade por Usuário</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {users.map(user => {
+                        const userTransactions = filteredTransactions.filter(t => t.userId === user.id)
+                        const userTotal = userTransactions.reduce((sum, t) => 
+                          t.type === 'entrada' ? sum + t.amount : 
+                          t.type === 'aporte' ? sum + t.amount : sum - t.amount, 0
+                        )
+                        
+                        if (userTransactions.length === 0) return null
+                        
+                        return (
+                          <div key={user.id} className="flex justify-between items-center">
+                            <div>
+                              <span className="text-sm font-medium">{user.name}</span>
+                              <div className="text-xs text-gray-500">
+                                {userTransactions.length} transações
+                              </div>
+                            </div>
+                            <span className={`font-medium ${userTotal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              R$ {userTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Produtividade da Equipe</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {users.map(user => {
+                      const userTasks = tasks.filter(t => t.assignedTo === user.id)
+                      const completedUserTasks = userTasks.filter(t => t.status === 'completed').length
+                      const completionRate = userTasks.length > 0 ? (completedUserTasks / userTasks.length) * 100 : 0
+                      
+                      if (userTasks.length === 0) return null
+                      
+                      return (
+                        <div key={user.id} className="flex justify-between items-center">
+                          <div>
+                            <span className="text-sm font-medium">{user.name}</span>
+                            <div className="text-xs text-gray-500">
+                              {completedUserTasks}/{userTasks.length} tarefas concluídas
+                            </div>
+                          </div>
+                          <span className={`font-medium ${
+                            completionRate >= 80 ? 'text-green-600' : 
+                            completionRate >= 50 ? 'text-yellow-600' : 'text-red-600'
+                          }`}>
+                            {completionRate.toFixed(0)}%
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           </TabsContent>
         </Tabs>
+
+        {/* Modal de Transação */}
+        <Dialog open={showTransactionModal} onOpenChange={setShowTransactionModal}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Adicionar Transação</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label>Tipo</Label>
+                <Select value={transactionForm.type} onValueChange={(value: any) => setTransactionForm({...transactionForm, type: value})}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="entrada">Entrada</SelectItem>
+                    <SelectItem value="saida">Saída</SelectItem>
+                    <SelectItem value="aporte">Aporte</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label>Categoria</Label>
+                <Select value={transactionForm.category} onValueChange={(value) => setTransactionForm({...transactionForm, category: value})}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione uma categoria" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categories.filter(cat => cat.type === transactionForm.type).map(cat => (
+                      <SelectItem key={cat.id} value={cat.name}>{cat.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label>Descrição</Label>
+                <Textarea
+                  value={transactionForm.description}
+                  onChange={(e) => setTransactionForm({...transactionForm, description: e.target.value})}
+                  placeholder="Descreva a transação..."
+                />
+              </div>
+
+              <div>
+                <Label>Valor (R$)</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={transactionForm.amount}
+                  onChange={(e) => setTransactionForm({...transactionForm, amount: e.target.value})}
+                  placeholder="0,00"
+                />
+              </div>
+
+              <div>
+                <Label>Data</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start text-left font-normal">
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {format(transactionForm.date, 'dd/MM/yyyy', { locale: ptBR })}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={transactionForm.date}
+                      onSelect={(date) => setTransactionForm({...transactionForm, date: date || new Date()})}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <div>
+                <Label>Forma de Pagamento</Label>
+                <Select value={transactionForm.paymentMethod} onValueChange={(value) => setTransactionForm({...transactionForm, paymentMethod: value})}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {paymentMethods.map(method => (
+                      <SelectItem key={method.id} value={method.name}>{method.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {transactionForm.type === 'saida' && (
+                <div>
+                  <Label>Plataforma (Anúncios)</Label>
+                  <Select value={transactionForm.platform} onValueChange={(value) => setTransactionForm({...transactionForm, platform: value, isAdvertising: value !== ''})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione (opcional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">Não é anúncio</SelectItem>
+                      <SelectItem value="Google">Google Ads</SelectItem>
+                      <SelectItem value="Facebook">Facebook Ads</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <Button onClick={addTransaction} className="w-full">
+                Adicionar Transação
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Modal de Tarefa */}
+        <Dialog open={showTaskModal} onOpenChange={setShowTaskModal}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Adicionar Tarefa</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label>Título da Tarefa</Label>
+                <Input
+                  value={taskForm.title}
+                  onChange={(e) => setTaskForm({...taskForm, title: e.target.value})}
+                  placeholder="Ex: Criar campanha no Facebook"
+                />
+              </div>
+
+              <div>
+                <Label>Descrição (Opcional)</Label>
+                <Textarea
+                  value={taskForm.description}
+                  onChange={(e) => setTaskForm({...taskForm, description: e.target.value})}
+                  placeholder="Descreva os detalhes da tarefa..."
+                />
+              </div>
+
+              <div>
+                <Label>Responsável</Label>
+                <Select value={taskForm.assignedTo} onValueChange={(value) => setTaskForm({...taskForm, assignedTo: value})}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um usuário" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {users.map(user => (
+                      <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label>Prazo</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start text-left font-normal">
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {format(taskForm.dueDate, 'dd/MM/yyyy', { locale: ptBR })}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={taskForm.dueDate}
+                      onSelect={(date) => setTaskForm({...taskForm, dueDate: date || new Date()})}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <Button onClick={addTask} className="w-full">
+                Adicionar Tarefa
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Modal de Convite */}
+        <Dialog open={showInviteModal} onOpenChange={setShowInviteModal}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Convidar Usuário</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label>Email</Label>
+                <Input
+                  type="email"
+                  value={inviteForm.email}
+                  onChange={(e) => setInviteForm({...inviteForm, email: e.target.value})}
+                  placeholder="usuario@email.com"
+                />
+              </div>
+              <div>
+                <Label>Permissão</Label>
+                <Select value={inviteForm.role} onValueChange={(value: any) => setInviteForm({...inviteForm, role: value})}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin">
+                      <div className="flex items-center space-x-2">
+                        <Shield className="h-4 w-4" />
+                        <span>Administrador - Acesso total</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="user">
+                      <div className="flex items-center space-x-2">
+                        <Users className="h-4 w-4" />
+                        <span>Usuário - Pode adicionar transações</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="viewer">
+                      <div className="flex items-center space-x-2">
+                        <Eye className="h-4 w-4" />
+                        <span>Visualizador - Apenas leitura</span>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button onClick={handleInviteUser} className="w-full">
+                <Mail className="h-4 w-4 mr-2" />
+                Enviar Convite
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Modal de Usuários */}
+        <Dialog open={showUsersModal} onOpenChange={setShowUsersModal}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Gerenciar Usuários</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-6">
+              <div className="flex justify-end">
+                <Button onClick={() => setShowInviteModal(true)}>
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  Convidar Usuário
+                </Button>
+              </div>
+              
+              <div>
+                <h4 className="font-medium mb-4">Usuários Ativos</h4>
+                <div className="space-y-3">
+                  {users.map(user => (
+                    <div key={user.id} className="flex items-center justify-between p-3 border rounded-lg">
+                      <div>
+                        <div className="font-medium">{user.name}</div>
+                        <div className="text-sm text-gray-500">{user.email}</div>
+                        <div className="text-xs text-gray-400">
+                          Criado em {format(new Date(user.createdAt), 'dd/MM/yyyy', { locale: ptBR })}
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Select 
+                          value={user.role} 
+                          onValueChange={(value: any) => updateUserRole(user.id, value)}
+                          disabled={user.id === currentUser?.id}
+                        >
+                          <SelectTrigger className="w-32">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="admin">Admin</SelectItem>
+                            <SelectItem value="user">Usuário</SelectItem>
+                            <SelectItem value="viewer">Visualizador</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {user.id === currentUser?.id && (
+                          <Badge variant="outline">Você</Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {invitations.length > 0 && (
+                <div>
+                  <h4 className="font-medium mb-4">Convites Pendentes</h4>
+                  <div className="space-y-3">
+                    {invitations.filter(inv => inv.status === 'pending').map(invitation => (
+                      <div key={invitation.id} className="flex items-center justify-between p-3 border rounded-lg bg-yellow-50">
+                        <div>
+                          <div className="font-medium">{invitation.email}</div>
+                          <div className="text-sm text-gray-500">
+                            Convidado em {format(new Date(invitation.createdAt), 'dd/MM/yyyy', { locale: ptBR })}
+                          </div>
+                        </div>
+                        <Badge variant="outline">{invitation.role}</Badge>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Modais de Configuração */}
         <Dialog open={showCategoryModal} onOpenChange={setShowCategoryModal}>
